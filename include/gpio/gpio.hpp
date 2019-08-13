@@ -183,7 +183,7 @@ public:
            ioctl::ioctl(chip.fd, ioctl::LineHandle{offsets, consumer, dir,
                                                    flags, defaults})
                .fd},
-        count{offsets.size()} {}
+        count{static_cast<offset_t>(offsets.size())} {}
 
   uint64_t get() {
     gpiohandle_data data = ioctl::ioctl(fd, ioctl::GetLineValues{});
