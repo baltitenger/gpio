@@ -48,17 +48,20 @@ template <typename T> auto ioctl(Fd &fd, T command) {
 }
 struct ChipInfo {
   gpiochip_info data_;
+
   int name() const { return GPIO_GET_CHIPINFO_IOCTL; }
   void *data() { return &data_; }
 };
 struct LineInfo {
   gpioline_info data_;
+
   int name() const { return GPIO_GET_LINEINFO_IOCTL; }
   void *data() { return &data_; }
   LineInfo(offset_t offset) { data_.line_offset = offset; }
 };
 struct LineHandle {
   gpiohandle_request data_;
+
   int name() const { return GPIO_GET_LINEHANDLE_IOCTL; }
   void *data() { return &data_; }
   template <typename Offsets = std::initializer_list<offset_t>>
@@ -92,11 +95,13 @@ struct LineHandle {
 };
 struct GetLineValues {
   gpiohandle_data data_;
+
   int name() const { return GPIOHANDLE_GET_LINE_VALUES_IOCTL; }
   void *data() { return &data_; }
 };
 struct SetLineValues {
   gpiohandle_data data_;
+
   int name() const { return GPIOHANDLE_SET_LINE_VALUES_IOCTL; }
   void *data() { return &data_; }
   SetLineValues(uint64_t values, offset_t count = MAX) {
@@ -109,6 +114,7 @@ struct SetLineValues {
 };
 struct EventHandle {
   gpioevent_request data_;
+
   int name() const { return GPIO_GET_LINEEVENT_IOCTL; }
   void *data() { return &data_; }
   template <typename Offsets = std::initializer_list<offset_t>>
@@ -132,14 +138,15 @@ struct EventHandle {
 };
 } // namespace ioctl
 
-struct Chip : public boost::asio::posix::stream_descriptor {
+struct Chip {
+  Fd fd;
   std::string name;
   std::string label;
   offset_t numLines;
 
   Chip(Ioc &ioc, const std::string &devName)
-      : stream_descriptor{ioc, open(("/dev/" + devName).c_str(), 0)} {
-    gpiochip_info info = ioctl::ioctl(*this, ioctl::ChipInfo{});
+      : fd{ioc, open(("/dev/" + devName).c_str(), 0)} {
+    gpiochip_info info = ioctl::ioctl(fd, ioctl::ChipInfo{});
 
     name = info.name;
     numLines = info.lines;
@@ -152,7 +159,7 @@ struct Chip : public boost::asio::posix::stream_descriptor {
   }
 
   LineInfo info(offset_t offset) {
-    gpioline_info info = ioctl::ioctl(*this, ioctl::LineInfo{offset});
+    gpioline_info info = ioctl::ioctl(fd, ioctl::LineInfo{offset});
 
     return {bool(info.flags & GPIOLINE_FLAG_KERNEL),
             info.flags & GPIOLINE_FLAG_IS_OUT ? Out : In,
@@ -163,21 +170,23 @@ struct Chip : public boost::asio::posix::stream_descriptor {
   }
 };
 
-struct LineHandle : public boost::asio::posix::stream_descriptor {
+class LineHandle {
+  Fd fd;
+
+public:
   offset_t count;
 
   template <typename Offsets = std::initializer_list<offset_t>>
   LineHandle(Chip &chip, const Offsets &offsets, const std::string &consumer,
              Dir dir, int flags = 0, uint64_t defaults = -1)
-      : stream_descriptor{chip.get_executor().context(),
-                          ioctl::ioctl(chip,
-                                       ioctl::LineHandle{offsets, consumer, dir,
-                                                         flags, defaults})
-                              .fd},
+      : fd{chip.fd.get_executor().context(),
+           ioctl::ioctl(chip.fd, ioctl::LineHandle{offsets, consumer, dir,
+                                                   flags, defaults})
+               .fd},
         count{offsets.size()} {}
 
   uint64_t get() {
-    gpiohandle_data data = ioctl::ioctl(*this, ioctl::GetLineValues{});
+    gpiohandle_data data = ioctl::ioctl(fd, ioctl::GetLineValues{});
 
     uint64_t res = 0;
     for (uint i = 0; i < count; ++i) {
@@ -187,34 +196,37 @@ struct LineHandle : public boost::asio::posix::stream_descriptor {
   }
 
   void set(uint64_t values) {
-    ioctl::ioctl(*this, ioctl::SetLineValues{values, count});
+    ioctl::ioctl(fd, ioctl::SetLineValues{values, count});
   }
 };
 
 struct Event {
   std::chrono::time_point<std::chrono::system_clock> timestamp;
   Edge edge;
+
   Event(std::chrono::time_point<std::chrono::system_clock> timestamp = {},
         Edge edge = Both) noexcept
-      : timestamp(timestamp), edge(edge) {}
+      : timestamp{timestamp}, edge{edge} {}
   operator bool() const noexcept {
     return timestamp.time_since_epoch().count() != 0;
   }
 };
 
-struct EventHandle : public boost::asio::posix::stream_descriptor {
+class EventHandle {
+  Fd fd;
+
+public:
   EventHandle(Chip &chip, offset_t offset, const std::string &consumer,
               int flags = 0, Edge events = Both)
-      : stream_descriptor{
-            chip.get_executor().context(),
-            ioctl::ioctl(chip,
-                         ioctl::EventHandle{offset, consumer, flags, events})
-                .fd} {}
+      : fd{chip.fd.get_executor().context(),
+           ioctl::ioctl(chip.fd,
+                        ioctl::EventHandle{offset, consumer, flags, events})
+               .fd} {}
 
   Event read() {
     gpioevent_data e;
     boost::system::error_code ec;
-    boost::asio::read(*this, boost::asio::buffer(&e, sizeof(e)), ec);
+    boost::asio::read(fd, boost::asio::buffer(&e, sizeof(e)), ec);
     if (ec) {
       if (ec == boost::asio::error::would_block) {
         return {};
@@ -226,6 +238,14 @@ struct EventHandle : public boost::asio::posix::stream_descriptor {
                 std::chrono::nanoseconds(e.timestamp)),
             (e.id == GPIOEVENT_EVENT_RISING_EDGE) ? Rising : Falling};
   }
+
+  template <typename WaitHandler> auto async_wait(WaitHandler &&handler) {
+    return fd.async_wait(fd.wait_read, handler);
+  }
+
+  void wait() { fd.wait(fd.wait_read); }
+
+  void wait(boost::system::error_code &ec) { fd.wait(fd.wait_read, ec); }
 };
 
 } // namespace Gpio
