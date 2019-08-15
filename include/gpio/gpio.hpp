@@ -105,9 +105,8 @@ struct SetLineValues {
   int name() const { return GPIOHANDLE_SET_LINE_VALUES_IOCTL; }
   void *data() { return &data_; }
   SetLineValues(uint64_t values, offset_t count = MAX) {
-    gpiohandle_data data;
     for (uint i = 0; i < count; ++i) {
-      data.values[i] = values & 1;
+      data_.values[i] = values & 1;
       values >>= 1;
     }
   }
