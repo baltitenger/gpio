@@ -20,7 +20,7 @@ int main(int argc, char *argv[]) {
     h.wait();
     Event e{h.read()};
     auto s{time_point_cast<seconds>(e.timestamp)};
-    auto frac{duration_cast<duration<int, std::milli>>(e.timestamp - s)};
+    auto frac{duration_cast<duration<int, std::micro>>(e.timestamp - s)};
     time_t time_c = system_clock::to_time_t(e.timestamp);
     tm *tm_c = std::localtime(&time_c);
     std::printf("Event at %02d:%02d:%02d.%06d: %s edge\n", tm_c->tm_hour,
