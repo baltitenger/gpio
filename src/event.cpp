@@ -2,6 +2,7 @@
 #include <boost/asio/io_context.hpp>
 #include <iomanip>
 #include <iostream>
+#include <ratio>
 
 using namespace Gpio;
 
@@ -19,12 +20,12 @@ int main(int argc, char *argv[]) {
     h.wait();
     Event e{h.read()};
     auto s{time_point_cast<seconds>(e.timestamp)};
-    auto frac{duration_cast<microseconds>(e.timestamp - s)};
+    auto frac{duration_cast<duration<int, std::milli>>(e.timestamp - s)};
     time_t time_c = system_clock::to_time_t(e.timestamp);
     tm *tm_c = std::localtime(&time_c);
-    std::printf("%s edge event at %02d:%02d:%02d.%06ld.\n",
-                e.edge == Rising ? "Rising" : "Falling", tm_c->tm_hour,
-                tm_c->tm_min, tm_c->tm_sec, frac.count());
+    std::printf("Event at %02d:%02d:%02d.%06d: %s edge\n", tm_c->tm_hour,
+                tm_c->tm_min, tm_c->tm_sec, frac.count(),
+                e.edge == Rising ? "Rising" : "Falling");
   }
   return 0;
 }
