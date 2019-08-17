@@ -238,6 +238,10 @@ public:
             (e.id == GPIOEVENT_EVENT_RISING_EDGE) ? Rising : Falling};
   }
 
+  void cancel() { fd.cancel(); }
+
+  void cancel(boost::system::error_code &ec) { fd.cancel(ec); }
+
   template <typename WaitHandler> auto async_wait(WaitHandler &&handler) {
     return fd.async_wait(fd.wait_read, handler);
   }
