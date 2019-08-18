@@ -200,11 +200,11 @@ public:
 };
 
 struct Event {
-  std::chrono::time_point<std::chrono::system_clock> timestamp;
+  using Timestamp = std::chrono::time_point<std::chrono::system_clock>;
+  Timestamp timestamp;
   Edge edge;
 
-  Event(std::chrono::time_point<std::chrono::system_clock> timestamp = {},
-        Edge edge = Both) noexcept
+  Event(Timestamp timestamp = {}, Edge edge = Both)
       : timestamp{timestamp}, edge{edge} {}
   operator bool() const noexcept {
     return timestamp.time_since_epoch().count() != 0;
