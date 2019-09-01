@@ -244,17 +244,14 @@ public:
         fd, boost::asio::buffer(&buf, sizeof(buf)),
         [&](const boost::system::error_code &ec, size_t) {
           if (ec) {
-            if (ec == boost::asio::error::would_block) {
-              event = {};
-              return handler();
-            } else {
-              throw boost::system::system_error{ec};
-            }
+            event = {};
+          } else {
+            event = {std::chrono::time_point<std::chrono::system_clock>(
+                         std::chrono::nanoseconds(buf.timestamp)),
+                     (buf.id == GPIOEVENT_EVENT_RISING_EDGE) ? Rising
+                                                             : Falling};
           }
-          event = {std::chrono::time_point<std::chrono::system_clock>(
-                       std::chrono::nanoseconds(buf.timestamp)),
-                   (buf.id == GPIOEVENT_EVENT_RISING_EDGE) ? Rising : Falling};
-          return handler();
+          return handler(ec);
         });
   }
 
