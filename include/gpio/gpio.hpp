@@ -138,13 +138,14 @@ struct EventHandle {
 } // namespace ioctl
 
 struct Chip {
+  Ioc &ioc;
   Fd fd;
   std::string name;
   std::string label;
   offset_t numLines;
 
   Chip(Ioc &ioc, const std::string &devName)
-      : fd{ioc, open(("/dev/" + devName).c_str(), 0)} {
+      : ioc{ioc}, fd{ioc, open(("/dev/" + devName).c_str(), 0)} {
     gpiochip_info info = ioctl::ioctl(fd, ioctl::ChipInfo{});
 
     name = info.name;
@@ -178,7 +179,7 @@ public:
   template <typename Offsets = std::initializer_list<offset_t>>
   LineHandle(Chip &chip, const Offsets &offsets, const std::string &consumer,
              Dir dir, int flags = 0, uint64_t defaults = -1)
-      : fd{chip.fd.get_executor().context(),
+      : fd{chip.ioc,
            ioctl::ioctl(chip.fd, ioctl::LineHandle{offsets, consumer, dir,
                                                    flags, defaults})
                .fd},
@@ -217,10 +218,9 @@ class EventHandle {
 public:
   EventHandle(Chip &chip, offset_t offset, const std::string &consumer,
               int flags = 0, Edge events = Both)
-      : fd{chip.fd.get_executor().context(),
-           ioctl::ioctl(chip.fd,
-                        ioctl::EventHandle{offset, consumer, flags, events})
-               .fd} {}
+      : fd{chip.ioc, ioctl::ioctl(chip.fd, ioctl::EventHandle{offset, consumer,
+                                                              flags, events})
+                         .fd} {}
 
   Event read() {
     gpioevent_data e;
