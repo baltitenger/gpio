@@ -18,7 +18,7 @@ int main(int argc, char *argv[]) {
   for (int i = 2; i < argc; ++i) {
     offsets.push_back(std::atoi(argv[i]));
   }
-  LineHandle h{chip, offsets, "test", In};
+  LineHandle h{chip, {offsets, "test", In}};
   while (std::cin) {
     uint64_t res = h.get();
     for (int i = 2; i < argc; ++i) {

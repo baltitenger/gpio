@@ -3,6 +3,7 @@
 
 #include <boost/asio/posix/stream_descriptor.hpp>
 #include <boost/asio/read.hpp>
+#include <boost/system/error_code.hpp>
 #include <chrono>
 #include <linux/gpio.h>
 #include <string>
@@ -12,9 +13,10 @@ using uint = unsigned int;
 using offset_t = uint8_t;
 using Fd = boost::asio::posix::stream_descriptor;
 using Ioc = boost::asio::io_context;
+using Ec = boost::system::error_code;
 
 const offset_t MAX = GPIOHANDLES_MAX;
-enum Edge {
+enum Edge : uint32_t {
   Rising = GPIOEVENT_REQUEST_RISING_EDGE,
   Falling = GPIOEVENT_REQUEST_FALLING_EDGE,
   Both = GPIOEVENT_REQUEST_BOTH_EDGES,
@@ -32,13 +34,15 @@ enum Flags {
 struct LineInfo {
   bool used;
   Dir dir;
-  int flags;
+  uint flags;
   std::string name;
   std::string consumer;
 
-  LineInfo(bool used, Dir dir, int flags, std::string name,
-           std::string consumer) noexcept
-      : used{used}, dir{dir}, flags{flags}, name{name}, consumer{consumer} {}
+  LineInfo(const gpioline_info &info) noexcept
+      : used{static_cast<bool>(info.flags & GPIOLINE_FLAG_KERNEL)},
+        dir{info.flags & GPIOLINE_FLAG_IS_OUT ? Out : In},
+        flags{info.flags & (ActiveLow | OpenDrain | OpenSource)},
+        name{info.name}, consumer{info.consumer} {}
 };
 
 namespace ioctl {
@@ -49,32 +53,30 @@ template <typename T> auto ioctl(Fd &fd, T command) {
 struct ChipInfo {
   gpiochip_info data_;
 
-  int name() const { return GPIO_GET_CHIPINFO_IOCTL; }
-  void *data() { return &data_; }
+  constexpr int name() const noexcept { return GPIO_GET_CHIPINFO_IOCTL; }
+  constexpr void *data() noexcept { return &data_; }
 };
 struct LineInfo {
   gpioline_info data_;
 
-  int name() const { return GPIO_GET_LINEINFO_IOCTL; }
-  void *data() { return &data_; }
-  LineInfo(offset_t offset) { data_.line_offset = offset; }
+  constexpr int name() const noexcept { return GPIO_GET_LINEINFO_IOCTL; }
+  constexpr void *data() noexcept { return &data_; }
+  constexpr LineInfo(offset_t offset) noexcept : data_{.line_offset = offset} {}
 };
 struct LineHandle {
   gpiohandle_request data_;
 
-  int name() const { return GPIO_GET_LINEHANDLE_IOCTL; }
-  void *data() { return &data_; }
+  constexpr int name() const noexcept { return GPIO_GET_LINEHANDLE_IOCTL; }
+  constexpr void *data() noexcept { return &data_; }
   template <typename Offsets = std::initializer_list<offset_t>>
-  LineHandle(const Offsets &offsets, const std::string &consumer, Dir dir,
-             int flags = 0, uint64_t defaults = -1) {
+  constexpr LineHandle(const Offsets &offsets, const std::string &consumer, Dir dir,
+             uint flags = 0, uint64_t defaults = -1) {
     if (offsets.size() > MAX) {
-      throw std::runtime_error("Maximum number of requested lines exceeded!");
+      throw std::runtime_error{"Maximum number of requested lines exceeded!"};
     } else if (dir == In && (flags & (OpenDrain | OpenSource))) {
-      throw std::runtime_error(
-          "Cant't be open drain or open source while inputting!");
+      throw std::runtime_error{"Cant't be open drain or open source while inputting!"};
     } else if ((flags & OpenDrain) && (flags & OpenSource)) {
-      throw std::runtime_error(
-          "Cant't be open drain and open source at the same time!");
+      throw std::runtime_error{"Cant't be open drain and open source at the same time!"};
     }
 
     data_.flags = dir | flags;
@@ -96,15 +98,15 @@ struct LineHandle {
 struct GetLineValues {
   gpiohandle_data data_;
 
-  int name() const { return GPIOHANDLE_GET_LINE_VALUES_IOCTL; }
-  void *data() { return &data_; }
+  constexpr int name() const noexcept { return GPIOHANDLE_GET_LINE_VALUES_IOCTL; }
+  constexpr void *data() noexcept { return &data_; }
 };
 struct SetLineValues {
   gpiohandle_data data_;
 
-  int name() const { return GPIOHANDLE_SET_LINE_VALUES_IOCTL; }
-  void *data() { return &data_; }
-  SetLineValues(uint64_t values, offset_t count = MAX) {
+  constexpr int name() const noexcept { return GPIOHANDLE_SET_LINE_VALUES_IOCTL; }
+  constexpr void *data() noexcept { return &data_; }
+  constexpr SetLineValues(uint64_t values, offset_t count = MAX) noexcept : data_{} {
     for (uint i = 0; i < count; ++i) {
       data_.values[i] = values & 1;
       values >>= 1;
@@ -114,14 +116,13 @@ struct SetLineValues {
 struct EventHandle {
   gpioevent_request data_;
 
-  int name() const { return GPIO_GET_LINEEVENT_IOCTL; }
-  void *data() { return &data_; }
+  constexpr int name() const noexcept { return GPIO_GET_LINEEVENT_IOCTL; }
+  constexpr void *data() noexcept { return &data_; }
   template <typename Offsets = std::initializer_list<offset_t>>
-  EventHandle(offset_t offset, const std::string &consumer, int flags = 0,
+  constexpr EventHandle(offset_t offset, const std::string &consumer, uint flags = 0,
               Edge events = Both) {
     if (flags & (OpenDrain | OpenSource)) {
-      throw std::runtime_error(
-          "Cant't be open drain or open source while inputting!");
+      throw std::runtime_error{"Cant't be open drain or open source while inputting!"};
     }
 
     data_.handleflags = In | flags;
@@ -145,28 +146,16 @@ struct Chip {
   offset_t numLines;
 
   Chip(Ioc &ioc, const std::string &devName)
-      : ioc{ioc}, fd{ioc, open(("/dev/" + devName).c_str(), 0)} {
-    gpiochip_info info = ioctl::ioctl(fd, ioctl::ChipInfo{});
+      : Chip{ioc, {ioc, open(("/dev/" + devName).c_str(), 0)}} {}
 
-    name = info.name;
-    numLines = info.lines;
+  Chip(Ioc &ioc, Fd &&fd)
+    : Chip{ioc, std::move(fd), ioctl::ioctl(fd, ioctl::ChipInfo{})} {}
 
-    if (info.label[0] == '\0') {
-      label = "unknown";
-    } else {
-      label = info.label;
-    }
-  }
+  Chip(Ioc &ioc, Fd &&fd, const gpiochip_info &info)
+    : ioc{ioc}, fd{std::move(fd)}, name{info.name}, label{info.label}, numLines{static_cast<offset_t>(info.lines)} {}
 
   LineInfo info(offset_t offset) {
-    gpioline_info info = ioctl::ioctl(fd, ioctl::LineInfo{offset});
-
-    return {bool(info.flags & GPIOLINE_FLAG_KERNEL),
-            info.flags & GPIOLINE_FLAG_IS_OUT ? Out : In,
-            ((info.flags & GPIOLINE_FLAG_ACTIVE_LOW) ? ActiveLow : 0) |
-                ((info.flags & GPIOLINE_FLAG_OPEN_DRAIN) ? OpenDrain : 0) |
-                ((info.flags & GPIOLINE_FLAG_OPEN_SOURCE) ? OpenSource : 0),
-            info.name, info.consumer};
+    return {ioctl::ioctl(fd, ioctl::LineInfo{offset})};
   }
 };
 
@@ -177,13 +166,9 @@ public:
   offset_t count;
 
   template <typename Offsets = std::initializer_list<offset_t>>
-  LineHandle(Chip &chip, const Offsets &offsets, const std::string &consumer,
-             Dir dir, int flags = 0, uint64_t defaults = -1)
-      : fd{chip.ioc,
-           ioctl::ioctl(chip.fd, ioctl::LineHandle{offsets, consumer, dir,
-                                                   flags, defaults})
-               .fd},
-        count{static_cast<offset_t>(offsets.size())} {}
+  LineHandle(Chip &chip, ioctl::LineHandle &&params)
+      : fd{chip.ioc, ioctl::ioctl(chip.fd, params).fd},
+        count{static_cast<offset_t>(params.data_.lines)} {}
 
   uint64_t get() {
     gpiohandle_data data = ioctl::ioctl(fd, ioctl::GetLineValues{});
@@ -200,14 +185,12 @@ public:
   }
 };
 
-struct Event {
-  using Timestamp = std::chrono::time_point<std::chrono::system_clock>;
+struct Event { // should be compatible with gpioevent_data
+  using Timestamp = std::chrono::time_point<std::chrono::system_clock, std::chrono::duration<uint64_t, std::nano>>;
   Timestamp timestamp;
   Edge edge;
 
-  Event(Timestamp timestamp = {}, Edge edge = Both)
-      : timestamp{timestamp}, edge{edge} {}
-  operator bool() const noexcept {
+  constexpr operator bool() const noexcept {
     return timestamp.time_since_epoch().count() != 0;
   }
 };
@@ -216,15 +199,12 @@ class EventHandle {
   Fd fd;
 
 public:
-  EventHandle(Chip &chip, offset_t offset, const std::string &consumer,
-              int flags = 0, Edge events = Both)
-      : fd{chip.ioc, ioctl::ioctl(chip.fd, ioctl::EventHandle{offset, consumer,
-                                                              flags, events})
-                         .fd} {}
+  EventHandle(Chip &chip, ioctl::EventHandle &&params)
+      : fd{chip.ioc, ioctl::ioctl(chip.fd, params).fd} {}
 
   Event read() {
-    gpioevent_data e;
-    boost::system::error_code ec;
+    Event e;
+    Ec ec;
     boost::asio::read(fd, boost::asio::buffer(&e, sizeof(e)), ec);
     if (ec) {
       if (ec == boost::asio::error::would_block) {
@@ -233,31 +213,17 @@ public:
         throw boost::system::system_error{ec};
       }
     }
-    return {std::chrono::time_point<std::chrono::system_clock>(
-                std::chrono::nanoseconds(e.timestamp)),
-            (e.id == GPIOEVENT_EVENT_RISING_EDGE) ? Rising : Falling};
+    return e;
   }
 
   template <typename ReadHandler>
-  void async_read(gpioevent_data &buf, Event &event, ReadHandler &&handler) {
-    boost::asio::async_read(
-        fd, boost::asio::buffer(&buf, sizeof(buf)),
-        [&](const boost::system::error_code &ec, size_t) {
-          if (ec) {
-            event = {};
-          } else {
-            event = {std::chrono::time_point<std::chrono::system_clock>(
-                         std::chrono::nanoseconds(buf.timestamp)),
-                     (buf.id == GPIOEVENT_EVENT_RISING_EDGE) ? Rising
-                                                             : Falling};
-          }
-          return handler(ec);
-        });
+  void async_read(Event &e, ReadHandler &&handler) {
+    boost::asio::async_read(fd, boost::asio::buffer(&e, sizeof(e)), handler);
   }
 
   void cancel() { fd.cancel(); }
 
-  void cancel(boost::system::error_code &ec) { fd.cancel(ec); }
+  void cancel(Ec &ec) { fd.cancel(ec); }
 
   template <typename WaitHandler> auto async_wait(WaitHandler &&handler) {
     return fd.async_wait(fd.wait_read, handler);
@@ -265,7 +231,7 @@ public:
 
   void wait() { fd.wait(fd.wait_read); }
 
-  void wait(boost::system::error_code &ec) { fd.wait(fd.wait_read, ec); }
+  void wait(Ec &ec) { fd.wait(fd.wait_read, ec); }
 };
 
 } // namespace Gpio

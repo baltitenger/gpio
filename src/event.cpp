@@ -14,7 +14,7 @@ int main(int argc, char *argv[]) {
   boost::asio::io_context ioc;
   Chip chip{ioc, argv[1]};
   offset_t offset = atoi(argv[2]);
-  EventHandle h{chip, offset, "test"};
+  EventHandle h{chip, {offset, "test"}};
   while (true) {
     using namespace std::chrono;
     h.wait();
