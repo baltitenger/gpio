@@ -4,9 +4,9 @@ set(CMAKE_CXX_STANDARD 17)
 
 add_library(gpio INTERFACE)
 target_include_directories(gpio INTERFACE include)
-target_link_libraries(gpio INTERFACE boost_system pthread)
+target_link_libraries(gpio INTERFACE pthread)
 
-if( CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR )
+if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   # We are building as stand-alone project
 
   if (NOT CMAKE_BUILD_TYPE)
@@ -25,4 +25,4 @@ if( CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR )
 
   add_executable(gpio_event src/event.cpp)
   target_link_libraries(gpio_event gpio)
-endif()
+endif ()
