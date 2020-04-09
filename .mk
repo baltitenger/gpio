@@ -19,8 +19,8 @@ $(libs): %: | lib/%
 	@git -C lib/$* fetch
 	@git -C lib/$* checkout --force $($*_ver)
 
-build: ; @mkdir $@
-lib:   ; @mkdir $@
+build: ; @mkdir -p $@
+lib:   ; @mkdir -p $@
 
 %.o: %.cpp
 %.o: %.c

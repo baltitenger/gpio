@@ -18,7 +18,7 @@ int main(int argc, char *argv[]) {
 	}
 	LineHandle h(ioc, chip, offsets, Out, argv[0]);
 	while (true) {
-		uint64_t val;
+		uint64_t val = 0;
 		for (int i = 2; i < argc; ++i) {
 			bool x;
 			std::cin >> x;

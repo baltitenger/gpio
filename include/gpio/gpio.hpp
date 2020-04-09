@@ -90,10 +90,11 @@ public:
 				req.default_values[i] = defaults & 1;
 				++i; ++it; defaults >>= 1;
 			}
-			flags = dir | flags;
+			req.flags = dir | flags;
 			std::memcpy(req.consumer_label, consumer.data(), consumer.length());
 			req.consumer_label[consumer.length()] = '\0';
 			req.lines = offsets.size();
+			req.fd = -1;
 			return req;
 		}()) {}
 
